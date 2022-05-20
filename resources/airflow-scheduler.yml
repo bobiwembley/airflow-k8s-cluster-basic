@@ -1,0 +1,68 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: airflow-scheduler
+  namespace: airflow
+spec:
+  selector:
+    matchLabels:
+      app: airflow-scheduler
+  template:
+    metadata:
+      labels:
+        app: airflow-scheduler
+    spec:
+      securityContext:
+        runAsUser: 50000
+        fsGroup: 0
+      volumes:
+        - name: airflow-storage
+          persistentVolumeClaim:
+            claimName: airflow-pv-scheduler
+      containers:
+      - name: airflow-scheduler
+        image: apache/airflow:2.2.4
+        imagePullPolicy: IfNotPresent
+        command: ["/bin/sh", "-c"]
+        args: ["mv /opt/airflow/git-sync/* /opt/airflow/; airflow db init; airflow scheduler"]
+        envFrom:
+          - configMapRef:
+              name: airflow-config
+        volumeMounts:
+        - mountPath: "/opt/airflow/"
+          name: airflow-storage
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "1Gi"
+          limits:
+            cpu: "150m"
+            memory: "1Gi"  
+      initContainers:
+      - image: k8s.gcr.io/git-sync:v3.0.1
+        name: git-data
+        volumeMounts:
+          - mountPath: /tmp/git
+            name: airflow-storage
+        env:
+        - name: GIT_SYNC_REPO
+          value: url_to_the_dags
+        - name: GIT_SYNC_BRANCH
+          value: master
+        - name: GIT_SYNC_DEPTH
+          value: "1"
+        - name: GIT_SYNC_DEST
+          value: git-sync
+        - name: GIT_SYNC_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: git-creds
+              key: username
+        - name: GIT_SYNC_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: git-creds
+              key: password
+        - name: GIT_SYNC_ONE_TIME
+          value: "true"
