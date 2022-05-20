@@ -1,0 +1,91 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: airflow-worker
+  namespace: airflow
+spec:
+  selector:
+    app: airflow-worker
+  ports:
+  - port: 8793
+    targetPort: 8793
+
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: airflow-worker
+  namespace: airflow
+spec:
+  selector:
+    matchLabels:
+      app: airflow-worker
+  serviceName: "airflow-worker"
+  replicas: 1
+  template:
+    metadata:
+      labels: 
+        app: airflow-worker
+    spec:
+      securityContext:
+        runAsUser: 50000
+        fsGroup: 0
+        - name: airflow-pv-worker
+          persistentVolumeClaim:
+            claimName: airflow-pv-worker
+      containers:
+      - name: airflow-worker
+        image: apache/airflow:2.2.4
+        imagePullPolicy: IfNotPresent
+        command: ["/bin/sh", "-c"]
+        args: ["pip install csvkit; mv /opt/airflow/git-sync/* /opt/airflow/; /airflow celery worker"]
+        envFrom:
+          - configMapRef:
+              name: airflow-config
+        volumeMounts:
+        - mountPath: "/opt/airflow/"
+          name:  airflow-pv-worker
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "1Gi"
+          limits:
+            cpu: "250m"
+            memory: '2Gi'
+      initContainers:
+      - image: k8s.gcr.io/git-sync:v3.0.1
+        name: git-data
+        volumeMounts:
+          - mountPath: /tmp/git
+            name:  airflow-pv-worker
+        env:
+        - name: GIT_SYNC_REPO
+          value: url_to_your_git_dag
+        - name: GIT_SYNC_BRANCH
+          value: master
+        - name: GIT_SYNC_DEPTH
+          value: "1"
+        - name: GIT_SYNC_DEST
+          value: git-sync
+        - name: GIT_SYNC_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: git-creds
+              key: username
+        - name: GIT_SYNC_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: git-creds
+              key: password
+        - name: GIT_SYNC_ONE_TIME
+          value: "true"
+  volumeClaimTemplates:
+  - metadata:
+      name: airflow-pv-worker
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 2Gi
